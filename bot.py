@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ChatMemberStatus
+from telegram.error import BadRequest
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler, ContextTypes,
     MessageHandler, filters
@@ -258,13 +259,13 @@ async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     upsert_user(user)
 
     if is_banned(user.id):
-        await query.edit_message_text("🚫 Aapka access restricted hai.")
+        await safe_edit_message(query, "🚫 Aapka access restricted hai.")
         return
 
     missing = await check_channels(context, user.id)
 
     if missing:
-        await query.edit_message_text(
+        await safe_edit_message(query, 
             "❌ *Verification failed.*\n\n"
             "Pehle ye required channel(s) join karein, "
             "phir *Verify Again* dabayein.",
@@ -276,7 +277,7 @@ async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE):
     set_verified(user.id)
     await reward_referrer_if_needed(user.id, context)
 
-    await query.edit_message_text(
+    await safe_edit_message(query, 
         "✅ *Verification successful!*\n\n"
         "🎉 Aapke sabhi required channels join hain.\n\n"
         "💰 *AmazonGC Bot is ready to use!*",
@@ -332,6 +333,17 @@ async def reward_referrer_if_needed(user_id, context):
         pass
 
 
+async def safe_edit_message(query, text, **kwargs):
+    """Edit a Telegram message without crashing if nothing actually changed."""
+    try:
+        await safe_edit_message(query, text, **kwargs)
+    except BadRequest as exc:
+        if "Message is not modified" in str(exc):
+            log.info("Skipped unchanged message edit.")
+            return
+        raise
+
+
 async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -347,21 +359,21 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     row = get_user(user_id)
 
     if query.data == "back":
-        await query.edit_message_text(
+        await safe_edit_message(query, 
             "🏠 *AmazonGC Bot Main Menu*",
             parse_mode="Markdown",
             reply_markup=main_menu()
         )
 
     elif query.data == "balance":
-        await query.edit_message_text(
+        await safe_edit_message(query, 
             f"💰 *My Balance*\n\n⭐ Points: *{row['points']}*",
             parse_mode="Markdown",
             reply_markup=back_button()
         )
 
     elif query.data == "stats":
-        await query.edit_message_text(
+        await safe_edit_message(query, 
             f"📊 *My Stats*\n\n"
             f"👤 ID: `{user_id}`\n"
             f"⭐ Points: *{row['points']}*\n"
@@ -373,7 +385,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "refer":
         me = await context.bot.get_me()
         link = f"https://t.me/{me.username}?start=ref_{user_id}"
-        await query.edit_message_text(
+        await safe_edit_message(query, 
             "👥 *Refer & Earn*\n\n"
             f"Har successful verified referral par aapko "
             f"*{REF_BONUS} points* milenge.\n\n"
@@ -383,7 +395,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif query.data == "gc":
-        await query.edit_message_text(
+        await safe_edit_message(query, 
             "🎁 *Amazon GC*\n\n"
             "Available gift cards dekhne ke liye 🎟️ Redeem par tap karein.\n\n"
             "Gift cards sirf admin ke dwara legitimately added "
@@ -402,7 +414,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_leaderboard(query)
 
     elif query.data == "channels":
-        await query.edit_message_text(
+        await safe_edit_message(query, 
             "📢 *Required Channels*\n\n"
             "Sabhi channels join rakhna zaroori hai.",
             parse_mode="Markdown",
@@ -410,7 +422,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif query.data == "help":
-        await query.edit_message_text(
+        await safe_edit_message(query, 
             "ℹ️ *Help*\n\n"
             "1️⃣ Required channels join karein.\n"
             "2️⃣ Verify Join dabayein.\n"
@@ -432,7 +444,7 @@ async def show_redeem(query):
         ).fetchall()
 
     if not cards:
-        await query.edit_message_text(
+        await safe_edit_message(query, 
             "🎟️ *Redeem*\n\n❌ Abhi koi gift card available nahi hai.",
             parse_mode="Markdown",
             reply_markup=back_button()
@@ -458,7 +470,7 @@ async def show_redeem(query):
 
     buttons.append([InlineKeyboardButton("⬅️ Back", callback_data="back")])
 
-    await query.edit_message_text(
+    await safe_edit_message(query, 
         "\n".join(lines),
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(buttons)
@@ -525,7 +537,7 @@ async def claim(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         conn.commit()
 
-    await query.edit_message_text(
+    await safe_edit_message(query, 
         "🎉 *Redeem Successful!*\n\n"
         f"🎁 Gift Card: `{card['code']}`\n"
         f"⭐ Points used: *{card['cost']}*\n\n"
@@ -554,7 +566,7 @@ async def show_leaderboard(query):
                 f"{i}. {name} — ⭐ {r['points']} | 👥 {r['referrals']}"
             )
 
-    await query.edit_message_text(
+    await safe_edit_message(query, 
         "\n".join(lines),
         parse_mode="Markdown",
         reply_markup=back_button()
