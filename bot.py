@@ -154,18 +154,41 @@ def channel_keyboard(channels=None):
 
 
 async def check_channels(context, user_id):
+    """Check membership in every required channel.
+
+    The bot must be an administrator in each channel for Telegram to
+    reliably return membership information for arbitrary users.
+    """
     missing = []
+
+    joined_statuses = {
+        ChatMemberStatus.MEMBER,
+        ChatMemberStatus.ADMINISTRATOR,
+        ChatMemberStatus.OWNER,
+    }
+
     for name, url, username in CHANNELS:
         try:
-            member = await context.bot.get_chat_member(username, user_id)
-            if member.status in (
-                ChatMemberStatus.LEFT,
-                ChatMemberStatus.KICKED,
-            ):
+            # Resolve the chat first, then check the user's membership.
+            chat = await context.bot.get_chat(username)
+            member = await context.bot.get_chat_member(chat.id, user_id)
+
+            if member.status not in joined_statuses:
                 missing.append((name, url, username))
+                log.info(
+                    "User %s is not joined in %s (status=%s)",
+                    user_id, username, member.status
+                )
+
         except Exception as exc:
-            log.warning("Membership check failed for %s: %s", username, exc)
+            # Any Telegram API error is treated as a failed verification,
+            # and the exact error is written to the bot logs.
+            log.warning(
+                "Membership check failed for user %s in %s: %s",
+                user_id, username, exc
+            )
             missing.append((name, url, username))
+
     return missing
 
 
@@ -639,7 +662,7 @@ async def addpoints(update: Update, context: ContextTypes.DEFAULT_TYPE):
         amount = int(context.args[1])
     except ValueError:
         await update.message.reply_text(
-            "USER_ID aur AMOUNT number hone chahiye."
+                        "USER_ID aur AMOUNT number hone chahiye."
         )
         return
 
