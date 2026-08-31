@@ -223,31 +223,31 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🚫 Aapka access restricted hai.")
         return
 
-    # Referral format: /start ref_123456789
-    payload = context.args[0] if context.args else ""
+    # Referral payloads accepted: /start ref_123456789 or /start 123456789
+    payload = context.args[0].strip() if context.args else ""
+    referrer_id = None
     if payload.startswith("ref_"):
-        try:
-            referrer_id = int(payload[4:])
-        except ValueError:
-            referrer_id = None
+        payload = payload[4:]
+    if payload.isdigit():
+        referrer_id = int(payload)
 
-        if referrer_id and referrer_id != user.id:
-            with closing(db()) as conn:
-                current = conn.execute(
-                    "SELECT referred_by FROM users WHERE user_id=?",
-                    (user.id,)
-                ).fetchone()
-                referrer = conn.execute(
-                    "SELECT user_id FROM users WHERE user_id=? AND banned=0",
-                    (referrer_id,)
-                ).fetchone()
-
-                if current and current["referred_by"] is None and referrer:
-                    conn.execute(
-                        "UPDATE users SET referred_by=? WHERE user_id=?",
-                        (referrer_id, user.id)
-                    )
-                    conn.commit()
+    if referrer_id and referrer_id != user.id:
+        with closing(db()) as conn:
+            current = conn.execute(
+                "SELECT referred_by FROM users WHERE user_id=?",
+                (user.id,)
+            ).fetchone()
+            referrer = conn.execute(
+                "SELECT user_id FROM users WHERE user_id=? AND banned=0",
+                (referrer_id,)
+            ).fetchone()
+            if current and current["referred_by"] is None and referrer:
+                conn.execute(
+                    "UPDATE users SET referred_by=? WHERE user_id=?",
+                    (referrer_id, user.id)
+                )
+                conn.commit()
+                log.info("Referral linked: referred_user=%s referrer=%s", user.id, referrer_id)
 
     missing = await check_channels(context, user.id)
 
@@ -367,35 +367,6 @@ async def safe_edit_message(query, text, **kwargs):
         raise
 
 
-async def refer_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show the user's personal referral link."""
-    query = update.callback_query
-    await query.answer()
-    user = query.from_user
-
-    if not await require_verified(update, context):
-        return
-
-    try:
-        me = await context.bot.get_me()
-        if not me.username:
-            raise RuntimeError("Bot username is not available")
-
-        link = f"https://t.me/{me.username}?start=ref_{user.id}"
-        text = (
-            "👥 *Refer & Earn*\n\n"
-            f"Har successful verified referral par aapko *{REF_BONUS} points* milenge.\n\n"
-            "🔗 *Your referral link:*\n"
-            f"`{link}`"
-        )
-        await safe_edit_message(
-            query, text, parse_mode="Markdown", reply_markup=back_button()
-        )
-    except Exception as exc:
-        log.exception("Refer & Earn failed for user %s: %s", user.id, exc)
-        await query.answer("Refer & Earn me error aa raha hai. Bot logs check karein.", show_alert=True)
-
-
 async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -437,13 +408,19 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "refer":
         me = await context.bot.get_me()
         link = f"https://t.me/{me.username}?start=ref_{user_id}"
-        await safe_edit_message(query, 
+        share_url = "https://t.me/share/url?url=" + link + "&text=Join%20AmazonGC%20Bot%20and%20earn%20rewards!"
+        await safe_edit_message(
+            query,
             "👥 *Refer & Earn*\n\n"
-            f"Har successful verified referral par aapko "
-            f"*{REF_BONUS} points* milenge.\n\n"
-            f"🔗 *Your referral link:*\n{link}",
+            f"Har successful verified referral par aapko *{REF_BONUS} points* milenge.\n\n"
+            "📌 Friend ko isi link se bot open karke *Start* karna hai, "
+            "channels join karke *Verify Join* karna hai.\n\n"
+            f"🔗 *Your referral link:*\n`{link}`",
             parse_mode="Markdown",
-            reply_markup=back_button()
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📤 Share Referral Link", url=share_url)],
+                [InlineKeyboardButton("⬅️ Back to Menu", callback_data="back")]
+            ])
         )
 
     elif query.data == "gc":
@@ -657,7 +634,7 @@ async def addcode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     code = context.args[0].strip()
 
     try:
-                cost = int(context.args[1])
+        cost = int(context.args[1])
         if cost <= 0:
             raise ValueError
     except ValueError:
@@ -822,7 +799,6 @@ def main():
 
     app.add_handler(CallbackQueryHandler(verify, pattern=r"^verify$"))
     app.add_handler(CallbackQueryHandler(claim, pattern=r"^claim:\d+$"))
-    app.add_handler(CallbackQueryHandler(refer_callback, pattern=r"^refer$"))
     app.add_handler(CallbackQueryHandler(callbacks))
 
     app.add_handler(
