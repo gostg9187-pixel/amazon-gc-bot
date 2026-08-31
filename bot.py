@@ -367,6 +367,35 @@ async def safe_edit_message(query, text, **kwargs):
         raise
 
 
+async def refer_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show the user's personal referral link."""
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+
+    if not await require_verified(update, context):
+        return
+
+    try:
+        me = await context.bot.get_me()
+        if not me.username:
+            raise RuntimeError("Bot username is not available")
+
+        link = f"https://t.me/{me.username}?start=ref_{user.id}"
+        text = (
+            "👥 *Refer & Earn*\n\n"
+            f"Har successful verified referral par aapko *{REF_BONUS} points* milenge.\n\n"
+            "🔗 *Your referral link:*\n"
+            f"`{link}`"
+        )
+        await safe_edit_message(
+            query, text, parse_mode="Markdown", reply_markup=back_button()
+        )
+    except Exception as exc:
+        log.exception("Refer & Earn failed for user %s: %s", user.id, exc)
+        await query.answer("Refer & Earn me error aa raha hai. Bot logs check karein.", show_alert=True)
+
+
 async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -628,7 +657,7 @@ async def addcode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     code = context.args[0].strip()
 
     try:
-        cost = int(context.args[1])
+                cost = int(context.args[1])
         if cost <= 0:
             raise ValueError
     except ValueError:
@@ -662,7 +691,7 @@ async def addpoints(update: Update, context: ContextTypes.DEFAULT_TYPE):
         amount = int(context.args[1])
     except ValueError:
         await update.message.reply_text(
-                        "USER_ID aur AMOUNT number hone chahiye."
+            "USER_ID aur AMOUNT number hone chahiye."
         )
         return
 
@@ -793,6 +822,7 @@ def main():
 
     app.add_handler(CallbackQueryHandler(verify, pattern=r"^verify$"))
     app.add_handler(CallbackQueryHandler(claim, pattern=r"^claim:\d+$"))
+    app.add_handler(CallbackQueryHandler(refer_callback, pattern=r"^refer$"))
     app.add_handler(CallbackQueryHandler(callbacks))
 
     app.add_handler(
